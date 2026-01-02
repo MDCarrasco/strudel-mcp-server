@@ -131,12 +131,22 @@ export class StrudelController {
 
     // Use evaluate for faster direct manipulation
     const writeResult = await this._page.evaluate((newPattern) => {
-      const content = document.querySelector('.cm-content') as HTMLElement | null;
-      const editorRoot = document.querySelector('.cm-editor') as HTMLElement | null;
+      const resolveEditor = () => {
+        const content = document.querySelector('.cm-content') as HTMLElement | null;
+        const editorRoot = document.querySelector('.cm-editor') as HTMLElement | null;
 
-      const view = (editorRoot as any)?.cmView
-        || (content as any)?.cmView
-        || (content as any)?.__view;
+        const view =
+          (editorRoot as any)?.cmView ||
+          (content as any)?.cmView ||
+          (editorRoot as any)?.view ||
+          (content as any)?.__view ||
+          (window as any).strudelView?.view ||
+          (window as any).editorView;
+
+        return { content, editorRoot, view };
+      };
+
+      const { content, view } = resolveEditor();
 
       if (view?.dispatch && view.state?.doc) {
         view.dispatch({
@@ -146,21 +156,16 @@ export class StrudelController {
       }
 
       if (content) {
-        // Fallback to contentEditable input simulation
+        // Fallback: direct contentEditable replacement
         content.focus();
-        const selection = window.getSelection();
-        if (selection) {
-          const range = document.createRange();
-          range.selectNodeContents(content);
-          selection.removeAllRanges();
-          selection.addRange(range);
-          document.execCommand('insertText', false, newPattern);
-        }
+        content.textContent = newPattern;
 
-        // Verify the text was applied
+        // Verify the text was applied (best-effort)
         const lines = Array.from(content.querySelectorAll('.cm-line'));
-        const text = lines.map(l => l.textContent ?? '').join('\n');
-        return { ok: text === newPattern, method: 'contentEditable' };
+        const text = lines.length > 0
+          ? lines.map(l => l.textContent ?? '').join('\n')
+          : content.textContent ?? '';
+        return { ok: !!text, method: 'contentEditable' };
       }
 
       return { ok: false, method: 'not-found' };
@@ -172,12 +177,22 @@ export class StrudelController {
 
     // Verify the write by reading back from browser (fixes cache sync issues)
     const verified = await this._page.evaluate(() => {
-      const content = document.querySelector('.cm-content') as HTMLElement | null;
-      const editorRoot = document.querySelector('.cm-editor') as HTMLElement | null;
+      const resolveEditor = () => {
+        const content = document.querySelector('.cm-content') as HTMLElement | null;
+        const editorRoot = document.querySelector('.cm-editor') as HTMLElement | null;
 
-      const view = (editorRoot as any)?.cmView
-        || (content as any)?.cmView
-        || (content as any)?.__view;
+        const view =
+          (editorRoot as any)?.cmView ||
+          (content as any)?.cmView ||
+          (editorRoot as any)?.view ||
+          (content as any)?.__view ||
+          (window as any).strudelView?.view ||
+          (window as any).editorView;
+
+        return { content, view };
+      };
+
+      const { content, view } = resolveEditor();
 
       if (view?.state?.doc) {
         return view.state.doc.toString();
@@ -185,7 +200,10 @@ export class StrudelController {
 
       if (content) {
         const lines = Array.from(content.querySelectorAll('.cm-line'));
-        return lines.map(l => l.textContent ?? '').join('\n');
+        if (lines.length > 0) {
+          return lines.map(l => l.textContent ?? '').join('\n');
+        }
+        return content.textContent ?? '';
       }
 
       return null;
@@ -218,12 +236,22 @@ export class StrudelController {
     }
 
     const pattern = await this._page.evaluate(() => {
-      const content = document.querySelector('.cm-content') as HTMLElement | null;
-      const editorRoot = document.querySelector('.cm-editor') as HTMLElement | null;
+      const resolveEditor = () => {
+        const content = document.querySelector('.cm-content') as HTMLElement | null;
+        const editorRoot = document.querySelector('.cm-editor') as HTMLElement | null;
 
-      const view = (editorRoot as any)?.cmView
-        || (content as any)?.cmView
-        || (content as any)?.__view;
+        const view =
+          (editorRoot as any)?.cmView ||
+          (content as any)?.cmView ||
+          (editorRoot as any)?.view ||
+          (content as any)?.__view ||
+          (window as any).strudelView?.view ||
+          (window as any).editorView;
+
+        return { content, view };
+      };
+
+      const { content, view } = resolveEditor();
 
       if (view?.state?.doc) {
         return view.state.doc.toString();
@@ -231,7 +259,10 @@ export class StrudelController {
 
       if (content) {
         const lines = Array.from(content.querySelectorAll('.cm-line'));
-        return lines.map(l => l.textContent ?? '').join('\n');
+        if (lines.length > 0) {
+          return lines.map(l => l.textContent ?? '').join('\n');
+        }
+        return content.textContent ?? '';
       }
 
       return '';
@@ -771,7 +802,18 @@ export class StrudelController {
     if (this._page) {
       try {
         diagnostics.editorReady = await this._page.evaluate(() => {
-          return document.querySelector('.cm-content') !== null;
+          const content = document.querySelector('.cm-content') as HTMLElement | null;
+          const editorRoot = document.querySelector('.cm-editor') as HTMLElement | null;
+
+          const view =
+            (editorRoot as any)?.cmView ||
+            (content as any)?.cmView ||
+            (editorRoot as any)?.view ||
+            (content as any)?.__view ||
+            (window as any).strudelView?.view ||
+            (window as any).editorView;
+
+          return !!(view?.state?.doc || content);
         });
 
         diagnostics.audioConnected = await this._page.evaluate(() => {

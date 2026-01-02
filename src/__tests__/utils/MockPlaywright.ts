@@ -131,7 +131,12 @@ export class MockPage implements Partial<Page> {
 
     if (fnString.includes('.cm-content') || fnString.includes('.cm-editor')) {
       // Handle write path (returns { ok, method })
-      if (fnString.includes('ok:') || fnString.includes('insertText') || fnString.includes('changes')) {
+      if (
+        fnString.includes('ok:') ||
+        fnString.includes('insertText') ||
+        fnString.includes('changes') ||
+        fnString.includes('textContent =')
+      ) {
         const newContent = args[0];
         if (typeof newContent === 'string') {
           this.content = newContent;
