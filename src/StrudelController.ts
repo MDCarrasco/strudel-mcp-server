@@ -283,6 +283,24 @@ export class StrudelController {
   async play(): Promise<string> {
     if (!this._page) throw new Error('Browser not initialized. Run init tool first.');
 
+    // Focus editor to ensure keyboard shortcuts are received
+    try {
+      await this._page.click('.cm-content', { timeout: 1000 });
+    } catch {
+      // Best-effort; continue even if focus fails
+    }
+
+    // Try the play button first (new Strudel UI requires a user gesture)
+    const playButton = await this._page.$('button[title="play"]');
+    if (playButton) {
+      await playButton.click();
+      await this._page.waitForTimeout(150);
+      // Also send shortcut to mirror original behavior and satisfy shortcut paths
+      await this._page.keyboard.press('ControlOrMeta+Enter');
+      this.isPlaying = true;
+      return 'Playing';
+    }
+
     // Always use keyboard shortcut for speed
     await this._page.keyboard.press('ControlOrMeta+Enter');
 
@@ -300,6 +318,23 @@ export class StrudelController {
    */
   async stop(): Promise<string> {
     if (!this._page) throw new Error('Browser not initialized. Run init tool first.');
+
+    // Focus editor to ensure keyboard shortcuts are received
+    try {
+      await this._page.click('.cm-content', { timeout: 1000 });
+    } catch {
+      // Best-effort
+    }
+
+    // If a play button exists, try clicking it again to toggle stop
+    const playButton = await this._page.$('button[title="play"]');
+    if (playButton) {
+      await playButton.click();
+      await this._page.waitForTimeout(150);
+      await this._page.keyboard.press('ControlOrMeta+Period');
+      this.isPlaying = false;
+      return 'Stopped';
+    }
 
     // Always use keyboard shortcut for speed
     await this._page.keyboard.press('ControlOrMeta+Period');

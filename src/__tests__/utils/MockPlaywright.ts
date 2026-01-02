@@ -59,6 +59,19 @@ export class MockPage implements Partial<Page> {
     // Mock route interception
   }
 
+  async $(selector: string): Promise<any> {
+    // Simulate Playwright's element handle query; return null when not needed
+    return {
+      click: async () => {
+        if (selector.includes('play')) {
+          this.isPlayingState = true;
+        } else if (selector.includes('stop')) {
+          this.isPlayingState = false;
+        }
+      }
+    };
+  }
+
   keyboard = {
     press: async (key: string): Promise<void> => {
       if (key.includes('Enter')) {
