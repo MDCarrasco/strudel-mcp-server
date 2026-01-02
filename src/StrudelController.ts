@@ -130,33 +130,82 @@ export class StrudelController {
     this.invalidateCache();
 
     // Use evaluate for faster direct manipulation
-    const success = await this._page.evaluate((newPattern) => {
-      const editor = document.querySelector('.cm-content') as HTMLElement;
-      if (editor) {
-        const view = (editor as any).__view;
-        if (view) {
-          view.dispatch({
-            changes: { from: 0, to: view.state.doc.length, insert: newPattern }
-          });
-          return true;
-        }
+    const writeResult = await this._page.evaluate((newPattern) => {
+      const resolveEditor = () => {
+        const content = document.querySelector('.cm-content') as HTMLElement | null;
+        const editorRoot = document.querySelector('.cm-editor') as HTMLElement | null;
+
+        const view =
+          (editorRoot as any)?.cmView ||
+          (content as any)?.cmView ||
+          (editorRoot as any)?.view ||
+          (content as any)?.__view ||
+          (window as any).strudelView?.view ||
+          (window as any).editorView;
+
+        return { content, editorRoot, view };
+      };
+
+      const { content, view } = resolveEditor();
+
+      if (view?.dispatch && view.state?.doc) {
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: newPattern }
+        });
+        return { ok: true, method: 'cmView' };
       }
-      return false;
+
+      if (content) {
+        // Fallback: direct contentEditable replacement
+        content.focus();
+        content.textContent = newPattern;
+
+        // Verify the text was applied (best-effort)
+        const lines = Array.from(content.querySelectorAll('.cm-line'));
+        const text = lines.length > 0
+          ? lines.map(l => l.textContent ?? '').join('\n')
+          : content.textContent ?? '';
+        return { ok: !!text, method: 'contentEditable' };
+      }
+
+      return { ok: false, method: 'not-found' };
     }, pattern);
 
-    if (!success) {
+    if (!writeResult.ok) {
       throw new Error('Failed to write pattern - editor not found or view unavailable');
     }
 
     // Verify the write by reading back from browser (fixes cache sync issues)
     const verified = await this._page.evaluate(() => {
-      const editor = document.querySelector('.cm-content') as HTMLElement;
-      if (editor) {
-        const view = (editor as any).__view;
-        if (view && view.state && view.state.doc) {
-          return view.state.doc.toString();
-        }
+      const resolveEditor = () => {
+        const content = document.querySelector('.cm-content') as HTMLElement | null;
+        const editorRoot = document.querySelector('.cm-editor') as HTMLElement | null;
+
+        const view =
+          (editorRoot as any)?.cmView ||
+          (content as any)?.cmView ||
+          (editorRoot as any)?.view ||
+          (content as any)?.__view ||
+          (window as any).strudelView?.view ||
+          (window as any).editorView;
+
+        return { content, view };
+      };
+
+      const { content, view } = resolveEditor();
+
+      if (view?.state?.doc) {
+        return view.state.doc.toString();
       }
+
+      if (content) {
+        const lines = Array.from(content.querySelectorAll('.cm-line'));
+        if (lines.length > 0) {
+          return lines.map(l => l.textContent ?? '').join('\n');
+        }
+        return content.textContent ?? '';
+      }
+
       return null;
     });
 
@@ -187,13 +236,35 @@ export class StrudelController {
     }
 
     const pattern = await this._page.evaluate(() => {
-      const editor = document.querySelector('.cm-content') as HTMLElement;
-      if (editor) {
-        const view = (editor as any).__view;
-        if (view && view.state && view.state.doc) {
-          return view.state.doc.toString();
-        }
+      const resolveEditor = () => {
+        const content = document.querySelector('.cm-content') as HTMLElement | null;
+        const editorRoot = document.querySelector('.cm-editor') as HTMLElement | null;
+
+        const view =
+          (editorRoot as any)?.cmView ||
+          (content as any)?.cmView ||
+          (editorRoot as any)?.view ||
+          (content as any)?.__view ||
+          (window as any).strudelView?.view ||
+          (window as any).editorView;
+
+        return { content, view };
+      };
+
+      const { content, view } = resolveEditor();
+
+      if (view?.state?.doc) {
+        return view.state.doc.toString();
       }
+
+      if (content) {
+        const lines = Array.from(content.querySelectorAll('.cm-line'));
+        if (lines.length > 0) {
+          return lines.map(l => l.textContent ?? '').join('\n');
+        }
+        return content.textContent ?? '';
+      }
+
       return '';
     });
 
@@ -212,6 +283,24 @@ export class StrudelController {
   async play(): Promise<string> {
     if (!this._page) throw new Error('Browser not initialized. Run init tool first.');
 
+    // Focus editor to ensure keyboard shortcuts are received
+    try {
+      await this._page.click('.cm-content', { timeout: 1000 });
+    } catch {
+      // Best-effort; continue even if focus fails
+    }
+
+    // Try the play button first (new Strudel UI requires a user gesture)
+    const playButton = await this._page.$('button[title="play"]');
+    if (playButton) {
+      await playButton.click();
+      await this._page.waitForTimeout(150);
+      // Also send shortcut to mirror original behavior and satisfy shortcut paths
+      await this._page.keyboard.press('ControlOrMeta+Enter');
+      this.isPlaying = true;
+      return 'Playing';
+    }
+
     // Always use keyboard shortcut for speed
     await this._page.keyboard.press('ControlOrMeta+Enter');
 
@@ -229,6 +318,23 @@ export class StrudelController {
    */
   async stop(): Promise<string> {
     if (!this._page) throw new Error('Browser not initialized. Run init tool first.');
+
+    // Focus editor to ensure keyboard shortcuts are received
+    try {
+      await this._page.click('.cm-content', { timeout: 1000 });
+    } catch {
+      // Best-effort
+    }
+
+    // If a play button exists, try clicking it again to toggle stop
+    const playButton = await this._page.$('button[title="play"]');
+    if (playButton) {
+      await playButton.click();
+      await this._page.waitForTimeout(150);
+      await this._page.keyboard.press('ControlOrMeta+Period');
+      this.isPlaying = false;
+      return 'Stopped';
+    }
 
     // Always use keyboard shortcut for speed
     await this._page.keyboard.press('ControlOrMeta+Period');
@@ -731,7 +837,18 @@ export class StrudelController {
     if (this._page) {
       try {
         diagnostics.editorReady = await this._page.evaluate(() => {
-          return document.querySelector('.cm-content') !== null;
+          const content = document.querySelector('.cm-content') as HTMLElement | null;
+          const editorRoot = document.querySelector('.cm-editor') as HTMLElement | null;
+
+          const view =
+            (editorRoot as any)?.cmView ||
+            (content as any)?.cmView ||
+            (editorRoot as any)?.view ||
+            (content as any)?.__view ||
+            (window as any).strudelView?.view ||
+            (window as any).editorView;
+
+          return !!(view?.state?.doc || content);
         });
 
         diagnostics.audioConnected = await this._page.evaluate(() => {
