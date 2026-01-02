@@ -129,24 +129,31 @@ export class MockPage implements Partial<Page> {
       }
     }
 
-    if (fnString.includes('.cm-content')) {
-      // Handle reading with CodeMirror API (view.state.doc.toString())
-      if (fnString.includes('view.state.doc.toString') || fnString.includes('doc.toString')) {
-        return this.content;
-      }
-      // Legacy textContent support
-      if (fnString.includes('textContent')) {
-        return this.content;
-      }
-      // Handle writing with CodeMirror dispatch
-      if (fnString.includes('dispatch')) {
+    if (fnString.includes('.cm-content') || fnString.includes('.cm-editor')) {
+      // Handle write path (returns { ok, method })
+      if (
+        fnString.includes('ok:') ||
+        fnString.includes('insertText') ||
+        fnString.includes('changes') ||
+        fnString.includes('textContent =')
+      ) {
         const newContent = args[0];
         if (typeof newContent === 'string') {
           this.content = newContent;
         }
-        return true; // Return success indicator
+        return { ok: true, method: 'mock' };
       }
-      // Handle querySelector returning element
+
+      // Handle read path (returns pattern string)
+      if (
+        fnString.includes('view.state.doc') ||
+        fnString.includes('lines.map') ||
+        fnString.includes('textContent')
+      ) {
+        return this.content;
+      }
+
+      // Handle querySelector existence checks
       if (fnString.includes('querySelector')) {
         return true; // Element exists
       }
